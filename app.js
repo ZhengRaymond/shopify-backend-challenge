@@ -5,8 +5,8 @@ const request = require('request-promise');
 
 const url = 'https://backend-challenge-winter-2017.herokuapp.com/customers.json?page=';
 
-function validate(validations, customer) {
-  let invalids = [];
+function validate_helper(validations, customer) {
+  var invalids = [];
   validations.forEach((validation) => {
     let field = Object.keys(validation);
     const { required, type, length } = validation[field];
@@ -26,37 +26,50 @@ function validate(validations, customer) {
   }
 }
 
-function recursive(page, customers) {
-  return request(url + page)
+function validate(customers) {
+  return request(url + '0')
     .then((result) => JSON.parse(result))
     .then((result) => {
-      if (result.customers && result.customers.length > 0) {
-        result.customers.forEach((customer) => {
-          const validation = validate(result.validations, customer);
-          if (validation.invalid_fields.length > 0) {
-            customers.push(validation);
-          }
-        })
-        return recursive(page+1, customers);
+      const { total, per_page } = result.pagination;
+      const num_pages = Math.ceil(total / per_page);
+
+      var requests = [];
+      for (let i = 1; i <= num_pages; i++) {
+        requests.push(request(url + i));
       }
-      else {
-        return customers;
-      }
+      return Promise.all(requests);
+    })
+    .then((results) => {
+      var invalidations = [];
+      results.forEach((result) => {
+        result = JSON.parse(result);
+        if (result.customers) {
+          result.customers.forEach((customer) => {
+            const validation = validate_helper(result.validations, customer);
+            if (validation.invalid_fields.length > 0) {
+              invalidations.push(validation);
+            }
+          })
+        }
+      });
+      return invalidations;
     })
 }
-
-app.get('/validations', (req, res) => {
-  var validations = {};
-  var customers = [];
-  var page = 1;
-  recursive(page, customers)
-    .then((data) => res.send(data));
-});
 
 app.get('/health', (req, res) => {
   res.status(200).send("Health check OK!");
 });
 
-app.listen(8000, function () {
-  console.log('Example app listening on port 8000!')
+app.get('/', (req, res) => {
+  var validations = {};
+  var customers = [];
+  var page = 1;
+  validate()
+    .then((data) => res.send(data));
+});
+
+const port = process.env.PORT || 8000;
+
+app.listen(port, function () {
+  console.log(`Example app listening on port ${port}!`)
 })
